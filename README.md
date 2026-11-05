@@ -2,7 +2,7 @@
 
 Auto-provision Enhance from PeltyCMS orders
 
-Official **provisioning module** for [PeltyCMS](https://github.com/MythicalLTD/PeltyCMS) — identifier `provisioning-enhance`.
+Official provisioning module for [PeltyCMS](https://github.com/MythicalLTD/PeltyCMS).
 
 ## Why this addon
 
@@ -18,25 +18,21 @@ Providers who sell hosting, VPS, game panels or cloud and need auto-create on pa
 
 ## How it works
 
-1. Install **Enhance** from the [Mythical marketplace](https://market.mythicalsystems.org/marketplace/product/provisioning-enhance) (or Pelty Admin → Addons → Marketplace).
-2. Open Pelty Admin and enter your Enhance credentials in the addon settings.
-3. Attach it to the products / forms / login flows you care about.
-4. New orders and sign-ins use Enhance automatically.
+1. Install **Enhance** from the [Mythical marketplace](https://market.mythicalsystems.org/marketplace/product/provisioning-enhance) inside Pelty Admin → Addons.
+2. Open Pelty Admin → Products, map a product to the Enhance module, and save API credentials.
+3. Customers hit checkout / login / order flow as usual — Enhance runs in the background.
 
 ## Requirements
 
-- A running PeltyCMS panel with WASM addons enabled
-- Valid Enhance API / OAuth / panel credentials (depending on the integration)
-- Outbound HTTPS from the panel to Enhance
+- PeltyCMS with WASM addons enabled
+- Working Enhance credentials
+- Outbound HTTPS from your panel
 
 ## Get it
 
-[Enhance on Mythical Marketplace](https://market.mythicalsystems.org/marketplace/product/provisioning-enhance)
-
-Free official build. Source for this package lives in this repository.
+**[Enhance on Mythical Marketplace](https://market.mythicalsystems.org/marketplace/product/provisioning-enhance)**
 
 ## Support
 
-- Marketplace product page: https://market.mythicalsystems.org/marketplace/product/provisioning-enhance
-- PeltyCMS core: https://github.com/MythicalLTD/PeltyCMS
-- Issues for this addon: use this repo’s Issues tab
+Bugs and questions for this addon → Issues on this repo.  
+PeltyCMS core → https://github.com/MythicalLTD/PeltyCMS
