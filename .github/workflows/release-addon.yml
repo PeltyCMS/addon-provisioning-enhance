@@ -1,0 +1,174 @@
+# FeatherPanel-style auto publisher for a single PeltyCMS WASM addon repo.
+# Requires secrets MYTHIC_PRODUCT_ID + MYTHIC_RELEASE_TOKEN and repo variable ADDON_DIR.
+
+name: Release Addon
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version (e.g. 0.1.1). Leave empty to use addon.json.
+        required: false
+        default: ""
+      environment:
+        description: Mythic Marketplace environment
+        type: choice
+        options:
+          - production
+          - dev
+        default: production
+      changelog:
+        description: Release notes
+        required: false
+        default: Updated to latest PeltyCMS addon version
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate secrets + vars
+        shell: bash
+        env:
+          HAS_PRODUCT_ID: ${{ secrets.MYTHIC_PRODUCT_ID != '' }}
+          HAS_RELEASE_TOKEN: ${{ secrets.MYTHIC_RELEASE_TOKEN != '' }}
+          ADDON_DIR: ${{ vars.ADDON_DIR }}
+        run: |
+          missing=0
+          if [ "${HAS_PRODUCT_ID}" != "true" ]; then
+            echo "::error::Missing repository secret MYTHIC_PRODUCT_ID"
+            missing=1
+          fi
+          if [ "${HAS_RELEASE_TOKEN}" != "true" ]; then
+            echo "::error::Missing repository secret MYTHIC_RELEASE_TOKEN"
+            missing=1
+          fi
+          if [ -z "${ADDON_DIR}" ]; then
+            echo "::error::Missing repository variable ADDON_DIR (folder under extensions/addons)"
+            missing=1
+          fi
+          if [ "${missing}" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Checkout monorepo
+        uses: actions/checkout@v4
+        with:
+          repository: MythicalLTD/PeltyCMS
+          ref: develop
+          path: monorepo
+
+      - name: Checkout this addon
+        uses: actions/checkout@v4
+        with:
+          path: addon-src
+
+      - name: Overlay addon into monorepo
+        shell: bash
+        env:
+          ADDON_DIR: ${{ vars.ADDON_DIR }}
+        run: |
+          set -euo pipefail
+          dest="monorepo/extensions/addons/${ADDON_DIR}"
+          rm -rf "${dest}"
+          mkdir -p "${dest}"
+          rsync -a --exclude '.git' --exclude '.github' --exclude 'target' addon-src/ "${dest}/"
+
+      - name: Resolve version + addon id
+        id: meta
+        shell: bash
+        env:
+          ADDON_DIR: ${{ vars.ADDON_DIR }}
+          VERSION_INPUT: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          json="monorepo/extensions/addons/${ADDON_DIR}/addon.json"
+          id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "${json}")"
+          if [ -n "${VERSION_INPUT}" ]; then
+            ver="${VERSION_INPUT}"
+            python3 - <<PY
+          import json
+          p = "${json}"
+          d = json.load(open(p))
+          d["version"] = "${ver}"
+          json.dump(d, open(p, "w"), indent=2)
+          open(p, "a").write("\n")
+          PY
+          else
+            ver="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "${json}")"
+          fi
+          echo "addon_id=${id}" >> "$GITHUB_OUTPUT"
+          echo "version=${ver}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust (wasm32-wasip2)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: monorepo -> monorepo/target
+          shared-key: pelty-addon-${{ vars.ADDON_DIR }}
+
+      - name: Build + pack addon zip
+        id: build
+        working-directory: monorepo
+        shell: bash
+        env:
+          ADDON_DIR: ${{ vars.ADDON_DIR }}
+        run: |
+          set -euo pipefail
+          id="${{ steps.meta.outputs.addon_id }}"
+          cargo xtask addons "${ADDON_DIR}"
+          zip="extensions/addons/dist/${id}.zip"
+          test -f "${zip}"
+          echo "zip_file=$(realpath "${zip}")" >> "$GITHUB_OUTPUT"
+          echo "zip_name=$(basename "${zip}")" >> "$GITHUB_OUTPUT"
+
+      - name: Publish to Mythic Marketplace
+        id: publish
+        uses: MythicalLTD/.github/actions/publish-release@v1
+        with:
+          product_id: ${{ secrets.MYTHIC_PRODUCT_ID }}
+          environment: ${{ inputs.environment }}
+          version: ${{ steps.meta.outputs.version }}
+          changelog: ${{ inputs.changelog }}
+          file_path: ${{ steps.build.outputs.zip_file }}
+          title: "${{ steps.meta.outputs.addon_id }} ${{ steps.meta.outputs.version }}"
+          release_token: ${{ secrets.MYTHIC_RELEASE_TOKEN }}
+
+      - name: Create GitHub Release
+        shell: bash
+        working-directory: addon-src
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ver="${{ steps.meta.outputs.version }}"
+          tag="v${ver}"
+          zip="${{ steps.build.outputs.zip_file }}"
+          notes="${{ inputs.changelog }}"
+          if gh release view "${tag}" >/dev/null 2>&1; then
+            gh release upload "${tag}" "${zip}" --clobber
+            gh release edit "${tag}" --notes "${notes}"
+          else
+            gh release create "${tag}" "${zip}" --title "${tag}" --notes "${notes}"
+          fi
+
+      - name: Release summary
+        if: success()
+        shell: bash
+        run: |
+          {
+            echo "### Pelty addon release published"
+            echo "| Addon | \`${{ steps.meta.outputs.addon_id }}\` |"
+            echo "| Dir | \`${{ vars.ADDON_DIR }}\` |"
+            echo "| Version | \`${{ steps.meta.outputs.version }}\` |"
+            echo "| Zip | \`${{ steps.build.outputs.zip_name }}\` |"
+            echo "| Environment | \`${{ inputs.environment }}\` |"
+            echo "| Marketplace | \`${{ steps.publish.outputs.release_url }}\` |"
+            echo "| GitHub | [\`v${{ steps.meta.outputs.version }}\`](${{ github.server_url }}/${{ github.repository }}/releases/tag/v${{ steps.meta.outputs.version }}) |"
+          } >> "$GITHUB_STEP_SUMMARY"
